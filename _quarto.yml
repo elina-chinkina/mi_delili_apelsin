@@ -1,19 +1,26 @@
 project:
   type: website
+  output-dir: docs
 
 website:
-  title: "JJJ"
+  title: "Jaccottet Project"
   navbar:
     left:
       - href: index.qmd
         text: Home
-      - about.qmd
+      - href: about.qmd
+        text: Corpus OCR
+      - href: regex.qmd
+        text: Regex
+      - href: frequency.qmd
+        text: Frequency
+      - href: cooc.qmd
+        text: Coocurence
 
 format:
   html:
     theme:
-      - cosmo
-      - brand
+      - slate
     css: styles.css
     toc: true
 

@@ -1,0 +1,113 @@
+# Совместная встречаемость слов
+
+## Ищем коллокации
+
+```{r, echo=FALSE, results='hide', message=FALSE, output=FALSE}
+library(tesseract)
+library(qpdf)
+library(pdftools)
+library(magick)
+library(purrr)
+library(tidyverse)
+library(tidytext)
+library(udpipe)
+library(igraph)
+library(ggraph)
+
+tesseract_download("fra")
+
+recognize_and_clean <- function(directory) {
+  files_Jac <- list.files(path = directory, pattern = "png", full.names = TRUE)
+  Jac_recognized <- map(files_Jac, ocr, engine = tesseract('fra'))
+  text_conc_Jac <- paste(Jac_recognized, collapse = " ")
+  
+  text_conc_Jac_clean <- text_conc_Jac |> 
+    # удаляет переносы
+    str_replace_all("(?<=\\p{L})-\\s*\\n\\s*(?=\\p{L})",'') |>
+    # удаляет пробел+двоеточие
+    str_replace_all('\\s+:', '') |> 
+    # удаляет пробел + черту вертикальную
+    str_replace_all('\\s+\\|', '') |> 
+    # удаляет слова из водяного знака
+    str_replace_all("(?im)^.*\\b\\w*sca\\w*\\b.*$",'') |> 
+    # удаляет цифры
+    str_replace_all('[[:digit:]]', '') |> 
+    # удаляем строки, в которых только один символ, потому что видим, что таких много 
+    str_replace_all('(?m)^\\s*\\S\\s*$', '') |> 
+    # удаляет переносы построчные, превращает их в пробелы
+    str_replace_all("\n", " ") |>
+    # схлопывает множественные пробелы до одного
+    str_replace_all(" +", " ") 
+}
+
+jaccottet_dirs <- list.files('./corpus', full.names=TRUE)
+data <- map(jaccottet_dirs, recognize_and_clean)
+
+jaccottet_tibble <- tibble(title = jaccottet_dirs, text = data)
+jaccotet_tibble_correct_titles <- jaccottet_tibble |> 
+  mutate(title = str_remove(title, "./corpus/"))
+
+udpipe_download_model(language = "french-gsd")
+french_gsd <- udpipe_load_model(file = "french-gsd-ud-2.5-191206.udpipe")
+character_text <- as.character(jaccotet_tibble_correct_titles$text)
+character_title <- as.character(jaccotet_tibble_correct_titles$title)
+
+jaccottet_ann <- udpipe_annotate(french_gsd, character_text, doc_id = character_title)
+anno_tbl <- as_tibble(jaccottet_ann)
+
+library(stopwords)
+sw <- stopwords("fr")
+anno_without_sw <- anno_tbl|> 
+  filter(!lemma %in% sw)
+
+lemm_clean_withput_punct <- anno_without_sw |> 
+  filter(!upos =='PUNCT')
+
+upos_tags <- lemm_clean_withput_punct |> 
+  select(upos) |> 
+  unique()
+
+final_tibble <- lemm_clean_withput_punct |> 
+  filter(!upos %in% c("PROPN", "PRON", "DET", "SCONJ", "CCONJ", "INTJ", "SYM","X", 'ADP'))
+
+final_tibble <- final_tibble |> 
+  filter(!lemma %in% c('avoir', 'être', 'où', 'plus', 'tout', 'encore', 'autre', 'faire'))
+```
+
+### Cчитаем совместную встречаемость слов в одном предложении:
+
+```{r}
+cooc_in_sentence <- cooccurrence(final_tibble, term = "lemma", group = "sentence_id") |>
+  as_tibble() |>
+  filter(cooc > 15)
+```
+
+### Строим график:
+
+```{r}
+wordnetwork_in_sentence <- graph_from_data_frame(cooc_in_sentence)
+ggraph(wordnetwork_in_sentence, layout = "fr") +
+  geom_edge_arc(aes(width = cooc), alpha = 0.8, edge_colour = "grey90", show.legend=FALSE) +
+  geom_node_label(aes(label = name), col = "#1f78b4", size = 4) +
+  theme_void() +
+  labs(title = "Совместная встречаемость слов в предложении")
+```
+
+### Считаем совместную встречаемость слов которые стоят рядом на расстоянии 1:
+
+```{r}
+cooc_close_words <- cooccurrence(final_tibble$lemma, skipgram = 1) |> 
+  as_tibble() |>
+  filter(cooc > 2)
+```
+
+### Строим график:
+
+```{r}
+wordnetwork_close_words <- graph_from_data_frame(cooc_close_words)
+ggraph(wordnetwork_close_words, layout = "fr") +
+  geom_edge_arc(aes(width = cooc), alpha = 0.8, edge_colour = "grey90", show.legend=FALSE) +
+  geom_node_label(aes(label = name), col = "#1f78b4", size = 4) +
+  theme_void() +
+  labs(title = "Совместная встречаемость слов, стоящих рядом")
+```
